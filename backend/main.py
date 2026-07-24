@@ -8,19 +8,10 @@ from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
 
 load_dotenv()
-DB_HOST = os.getenv("DB_HOST")
-DB_PORT = os.getenv("DB_PORT")
-DB_NAME = os.getenv("DB_NAME")
-DB_USER = os.getenv("DB_USER")
-DB_PASSWORD = os.getenv("DB_PASSWORD")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+psycopg2:///finview")
 
-DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-NEWSDB_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/newsdb"
-
-engine = create_engine(DATABASE_URL, echo=False)
-newsdb_engine = create_engine(NEWSDB_URL, echo=False)
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-NewsDBSession = sessionmaker(autocommit=False, autoflush=False, bind=newsdb_engine)
 
 app = FastAPI()
 
@@ -31,10 +22,11 @@ def calculate_rrg_data():
 
     # noinspection SqlDialectInspection
     query = """
-    SELECT date, ticker, close
-    FROM prices
-    WHERE "Group" = 'ETF' AND date > CURRENT_DATE - INTERVAL '2 years'
-      AND close IS NOT NULL
+    SELECT p.date, p.ticker, p.close
+    FROM prices p
+    INNER JOIN sector_etfs s ON s.symbol = p.ticker
+    WHERE p.date > CURRENT_DATE - INTERVAL '2 years'
+      AND p.close IS NOT NULL
     """
     with SessionLocal() as db:
         df = pd.read_sql(query, db.bind)
@@ -122,7 +114,7 @@ def get_sector_chart_data():
     SELECT symbol, name FROM sector_etfs
     """
 
-    with NewsDBSession() as db:
+    with SessionLocal() as db:
         etf_names_df = pd.read_sql(names_query, db.bind)
 
     etf_names = dict(zip(etf_names_df['symbol'], etf_names_df['name']))
@@ -152,7 +144,7 @@ def get_sector_chart_data():
     ORDER BY p.ticker, p.date
     """
 
-    with NewsDBSession() as db:
+    with SessionLocal() as db:
         df = pd.read_sql(query, db.bind)
 
     # Convert to dict grouped by ticker
@@ -219,7 +211,7 @@ if __name__ == "__main__":
     # Start the backend (this process)
     print("🔧 Starting backend (FastAPI)...")
     print("=" * 50)
-    print("\n📊 Backend running at: http://localhost:8000")
+    print("\n📊 Backend running at: http://localhost:8010")
     print("🌐 Frontend running at: http://localhost:5173")
     print("\nPress Ctrl+C to stop both servers\n")
     print("=" * 50)
@@ -233,7 +225,7 @@ if __name__ == "__main__":
 
     try:
         import uvicorn
-        uvicorn.run(app, host="0.0.0.0", port=8000)
+        uvicorn.run(app, host="0.0.0.0", port=8010)
     except KeyboardInterrupt:
         print("\n\n🛑 Shutting down servers...")
         frontend_process.terminate()
