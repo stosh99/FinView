@@ -25,71 +25,86 @@ NewsDBSession = sessionmaker(autocommit=False, autoflush=False, bind=newsdb_engi
 app = FastAPI()
 
 def calculate_rrg_data():
+    benchmark = "SPY"
+    window = 14
+    tail_length = 12
+
     # noinspection SqlDialectInspection
     query = """
     SELECT date, ticker, close
     FROM prices
-    WHERE "Group" = 'ETF' AND date > CURRENT_DATE - INTERVAL '3 months'
+    WHERE "Group" = 'ETF' AND date > CURRENT_DATE - INTERVAL '2 years'
+      AND close IS NOT NULL
     """
     with SessionLocal() as db:
         df = pd.read_sql(query, db.bind)
         print(f"Initial data loaded with {len(df)} rows.")
-    
-    df['date'] = pd.to_datetime(df['date'])
-    
-    # Pivot the table to get tickers as columns
-    pivot_df = df.pivot(index='date', columns='ticker', values='close')
-    print(f"Pivot table created with {len(pivot_df)} rows.")
 
-    # Fill missing values before calculating returns
-    pivot_df = pivot_df.ffill()
-    
-    # Calculate returns
-    returns = pivot_df.pct_change().dropna()
-    print(f"Returns calculated. Shape: {returns.shape}")
-    
-    # Separate benchmark and sectors
-    if 'SPY' not in returns.columns:
-        print("SPY data not found in returns.")
+    if df.empty:
         return []
-        
-    benchmark_returns = returns['SPY']
 
-    # Check for zero values in benchmark returns
-    if np.any(benchmark_returns == 0):
-        print("Warning: Zero values found in benchmark returns. Replacing with NaN.")
-        benchmark_returns = benchmark_returns.replace(0, pd.NA)
+    df['date'] = pd.to_datetime(df['date'])
 
-    sector_returns = returns.drop(columns=['SPY'])
+    # Pivot the table to get tickers as columns
+    pivot_df = df.pivot_table(index='date', columns='ticker', values='close', aggfunc='last')
+    pivot_df = pivot_df.sort_index().ffill()
+    print(f"Pivot table created with {len(pivot_df)} daily rows.")
 
-    # Calculate relative strength
-    relative_strength = sector_returns.div(benchmark_returns, axis=0)
-    
-    # Calculate JdK RS-Ratio (Momentum of RS)
-    rs_ratio = (relative_strength / relative_strength.rolling(window=10).mean()) * 100
-    
-    # Calculate JdK RS-Momentum (ROC of RS-Ratio)
-    rs_momentum = rs_ratio.pct_change(periods=5) * 100
+    if benchmark not in pivot_df.columns:
+        print(f"{benchmark} data not found in prices.")
+        return []
 
-    # Drop rows with any NaN values after calculations
-    rs_ratio = rs_ratio.dropna()
-    rs_momentum = rs_momentum.dropna()
+    # RRGs are usually evaluated on weekly data. Use the last available close
+    # in each week so every point in the tail represents one week.
+    weekly_prices = pivot_df.resample('W-FRI').last().ffill()
+    print(f"Weekly price table created with {len(weekly_prices)} rows.")
+
+    benchmark_prices = weekly_prices[benchmark].replace(0, np.nan)
+    sector_prices = weekly_prices.drop(columns=[benchmark])
+
+    # Directional approximation of RRG calculations:
+    # 1. Relative strength is sector price divided by benchmark price.
+    # 2. RS-Ratio is relative strength normalized around its rolling mean.
+    # 3. RS-Momentum is RS-Ratio normalized around its rolling mean.
+    relative_strength = sector_prices.div(benchmark_prices, axis=0)
+    rs_ratio = 100 * relative_strength.div(relative_strength.rolling(window=window).mean())
+    rs_momentum = 100 * rs_ratio.div(rs_ratio.rolling(window=window).mean())
+
+    rs_ratio = rs_ratio.replace([np.inf, -np.inf], np.nan)
+    rs_momentum = rs_momentum.replace([np.inf, -np.inf], np.nan)
 
     if rs_ratio.empty or rs_momentum.empty:
-        print("No data after calculations and dropping NaNs.")
+        print("No data after RRG calculations.")
         return []
-    
-    # Get the latest data
-    latest_rs_ratio = rs_ratio.iloc[-1].to_dict()
-    latest_rs_momentum = rs_momentum.iloc[-1].to_dict()
-    
-    rrg_data = [
-        {"ticker": ticker, "rs_ratio": rs_ratio_val, "rs_momentum": latest_rs_momentum.get(ticker)}
-        for ticker, rs_ratio_val in latest_rs_ratio.items()
-        if ticker in latest_rs_momentum
-    ]
-    
-    print(f"Returning {len(rrg_data)} data points.")
+
+    rrg_data = []
+    for ticker in rs_ratio.columns:
+        ticker_df = pd.DataFrame({
+            'rs_ratio': rs_ratio[ticker],
+            'rs_momentum': rs_momentum[ticker],
+        }).dropna()
+
+        if len(ticker_df) < tail_length:
+            continue
+
+        tail_df = ticker_df.tail(tail_length).reset_index()
+        tail = [
+            {
+                'date': row['date'].strftime('%Y-%m-%d'),
+                'rs_ratio': round(float(row['rs_ratio']), 4),
+                'rs_momentum': round(float(row['rs_momentum']), 4),
+            }
+            for _, row in tail_df.iterrows()
+        ]
+        latest = tail[-1]
+
+        rrg_data.append({
+            'ticker': ticker,
+            'latest': latest,
+            'tail': tail,
+        })
+
+    print(f"Returning {len(rrg_data)} RRG tails.")
     return rrg_data
 
 @app.get("/api/rrg-data")
