@@ -65,9 +65,13 @@ sleeves). Categories match `sector_etfs.category`.
 - Check against BIL, 2008–2026: BIL trails the DTB3-implied return by about
   0.17%/yr on average (≈ fees). Apply ~0.15%/yr drag to the DTB3 series so
   pre-2007 cash isn't flattered.
-- **Open:** BIL's 2026 year-to-date return trails DTB3 by ~0.8% — larger than
-  expected. Suspect Yahoo's dividend adjustment is missing recent monthly
-  distributions. Investigate before trusting BIL for 2026.
+- **Open:** BIL's 2026 year-to-date return trails DTB3 by ~0.8%. Cause
+  confirmed (Nov 6 2026): Yahoo's dividend list for BIL stops at 2026-09-01,
+  so the Oct and Nov distributions aren't adjusted out — the adjusted close
+  drops on 2026-10-01 (−0.23) and 2026-11-02 (−0.29), ~0.57% together. SGOV
+  shows the same gap, so it is Yahoo-side, not BIL-specific. Before the
+  backtest trusts BIL for 2026: reload once Yahoo catches up, or apply the
+  missing distributions from issuer data.
 
 ## Backtest honesty rules
 

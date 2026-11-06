@@ -5,6 +5,11 @@ allocation/backtesting system and, later, the home of the DCF engine.
 Design decisions for the allocation work live in `docs/ALLOCATION_DESIGN.md`
 — read it before touching anything backtest-related.
 
+## Read first
+
+- `docs/DECISIONS.md` — dated decisions, newest first, tagged by area
+  (`[web]`, `[data]`, `[backtest]`...). Grep for your area before changing code.
+
 ## Stack
 
 - Backend: FastAPI + SQLAlchemy 2.0 + **psycopg 3** + Alembic, Python 3.12
@@ -61,8 +66,11 @@ npm --prefix frontend run dev
 - `rates(series_id, date, value)` — FRED series; `DTB3` (3-month T-bill, %).
 - The ETF list lives in `ETFS` in `backend/load_market_data.py`. To add an ETF:
   add it there with a valid category, then run the loader.
-- The RRG and sector-chart endpoints filter to `category IN ('benchmark',
-  'sector')` so new basket ETFs don't appear there unless deliberately added.
+- The RRG endpoints filter to `category IN ('benchmark', 'sector')` so new
+  basket ETFs don't appear there unless deliberately added. The chart
+  endpoint (`/api/sector-chart-data`) returns every ETF, ordered by
+  `CHART_CATEGORY_ORDER` in `backend/main.py` — add any new category there.
+- Cash ETFs are charted as the FRED DTB3 yield, not candlesticks.
 
 ## Rules
 
@@ -95,7 +103,7 @@ npm --prefix frontend run dev
 - **Prod is behind:** VPS code is at an older commit and `finview_prod` is on
   migration 0001. Updating it (pull, `alembic upgrade head`, full load) needs
   Stosh's go-ahead.
-- **Next:** add charts for the new basket ETFs (IWM, VGK, EWJ, VWO, GLD, PDBC,
-  UUP, BIL) to the charts page — decide whether they share the sector page or
-  get their own section/filter, and widen the endpoint's category filter
-  accordingly.
+- Done (Nov 6 2026): charts page covers the whole basket, grouped by
+  category; layout still to be confirmed with user tests.
+- **Next:** backtest engine (`allockit/`, step 2 in the design doc). Resolve
+  the BIL missing-distribution gap first (see design doc, Cash series).
