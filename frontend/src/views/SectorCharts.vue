@@ -75,7 +75,10 @@ export default {
 
         // Prepare data for ECharts
         const dates = data.dates;
-        const ohlc = data.ohlc;
+        // The API sends [open, high, low, close]; ECharts candlesticks expect
+        // [open, close, low, high]. Without this reorder ECharts reads the high
+        // as the close, so every candle looks like an up day.
+        const ohlc = data.ohlc.map(([open, high, low, close]) => [open, close, low, high]);
 
         // One colour per indicator, applied to both lineStyle (the drawn line)
         // and itemStyle (what the legend swatch is filled from) so the two
