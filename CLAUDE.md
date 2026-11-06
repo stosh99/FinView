@@ -1,26 +1,32 @@
 # FinView — project guide
 
-Sector-ETF dashboard (weekly RRG, candlestick charts) growing into an ETF
-allocation/backtesting system and, later, the home of the DCF engine.
-Design decisions for the allocation work live in `docs/ALLOCATION_DESIGN.md`
-— read it before touching anything backtest-related.
+FinView is the implementation of **FinProject**: Stosh's personal investment
+research and decision-support platform (holdings, income, trade journal,
+valuation, ETF rotation, news, daily brief — on one site, built as modules).
 
 ## Read first
 
-- `docs/DECISIONS.md` — dated decisions, newest first, tagged by area
-  (`[web]`, `[data]`, `[backtest]`...). Grep for your area before changing code.
+- `docs/finproject/00_START_HERE.md` → project brief, decision log,
+  anti-resurrection log (what was rejected and why; don't re-propose without
+  the reversal rule).
+- `docs/ALLOCATION_DESIGN.md` — ETF rotation design; read before touching
+  anything signal- or backtest-related.
+- `docs/DECISIONS.md` — one-line code/UI decisions, tagged by area
+  (`[web]`, `[data]`...). Grep for your area before changing code.
+
+Where to record a decision: project, strategy or data-source choices →
+`docs/finproject/02_decision_log.md` (D-numbers); code and UI choices made
+while building → `docs/DECISIONS.md`. Never both — link instead.
 
 ## Stack
 
 - Backend: FastAPI + SQLAlchemy 2.0 + **psycopg 3** + Alembic, Python 3.12
 - Frontend: Vue 3 + Vite + ECharts (`frontend/`)
 - Data: yfinance (dividend-adjusted daily prices), FRED CSV (rates)
-- PostgreSQL 16 on the VPS
 
 ## Machines and environments
 
-- **Dev = the 5090 machine** (`stoshai`, `~/PyCharmProjects/FinView`). All
-  development happens here.
+- **Dev = the 5090 machine** (`stoshai`, `~/PyCharmProjects/FinView`).
 - **Prod = the VPS** (`stosh99@66.220.29.98`, `~/projects/FinView`). Not yet
   deployed as a service (no systemd unit / nginx site).
 - Both databases live on the VPS's main cluster (port 5432), one role each:
@@ -70,7 +76,6 @@ npm --prefix frontend run dev
   basket ETFs don't appear there unless deliberately added. The chart
   endpoint (`/api/sector-chart-data`) returns every ETF, ordered by
   `CHART_CATEGORY_ORDER` in `backend/main.py` — add any new category there.
-- Cash ETFs are charted as the FRED DTB3 yield, not candlesticks.
 
 ## Rules
 
@@ -92,18 +97,9 @@ npm --prefix frontend run dev
 - ECharts candlestick data order is `[open, close, low, high]`; the API sends
   `[open, high, low, close]` and `SectorCharts.vue` reorders it. Keep that in
   mind for any new candlestick chart.
-- Verify, don't assume: after a change, hit the endpoint or look at the page;
-  after a load, query the table.
 
-## Current status / next step
+## Status and priorities
 
-- Done (Nov 2026): psycopg 3 + Alembic (migrations 0001–0003), dev/prod DB
-  split, allocation basket loaded into `finview_dev` with full history, FRED
-  DTB3 loaded.
-- **Prod is behind:** VPS code is at an older commit and `finview_prod` is on
-  migration 0001. Updating it (pull, `alembic upgrade head`, full load) needs
-  Stosh's go-ahead.
-- Done (Nov 6 2026): charts page covers the whole basket, grouped by
-  category; layout still to be confirmed with user tests.
-- **Next:** backtest engine (`allockit/`, step 2 in the design doc). Resolve
-  the BIL missing-distribution gap first (see design doc, Cash series).
+- Priorities: D-020 in the decision log; module status: brief §2–3.
+- **Prod is behind dev** (`finview_prod` on migration 0001, older VPS code).
+  Don't assume prod matches dev.

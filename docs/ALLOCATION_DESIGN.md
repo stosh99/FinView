@@ -4,9 +4,11 @@ Goal: use FinView to choose ETFs for a monthly (possibly quarterly) allocation,
 then backtest the method honestly before any real money follows it.
 
 Order of work: (1) establish the ETF basket — **done**, (2) backtest to choose
-the allocation method, (3) visualizations and method-testing UI.
+the allocation method, (3) signal view, visualizations and method-testing UI.
+Project-wide priorities: D-020 in `finproject/02_decision_log.md`.
 
-Decisions below are settled unless marked **open**.
+Decisions below are current working choices, revised as the work goes;
+items marked **open** are undecided.
 
 ## Basket
 
@@ -32,10 +34,12 @@ sleeves). Categories match `sector_etfs.category`.
 ## Allocation mechanics
 
 - **Fixed slots with a cash fallback.** Pick N slots (4–6 to test). Each
-  rebalance, rank competitors by momentum and take the top N; each winner must
-  also pass an absolute trend test (e.g. above its 10-month SMA, or positive
-  12-month return). A slot whose asset fails goes to cash — it is **not**
-  refilled by the next-ranked asset. The portfolio can range from 100%
+  rebalance, rank competitors by momentum and take the top N. **Open:**
+  whether winners must also pass a trend filter, and which — candidates
+  (ideas only, to be chosen by backtest, D-018): golden cross (SMA50 >
+  SMA200), price above its 10-month SMA, positive 12-month return, or no
+  filter. If a filter is used, a slot whose asset fails goes to cash — it is
+  **not** refilled by the next-ranked asset. The portfolio can range from 100%
   invested to 100% cash.
 - Why not "everything into whatever passes": when only one or two assets pass
   it is usually a stress period and the survivors are narrow trades;
