@@ -1,16 +1,11 @@
-import os
-
 import numpy as np
 import pandas as pd
-from dotenv import load_dotenv
 from fastapi import FastAPI
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-load_dotenv()
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+psycopg2:///finview")
+from backend.db import make_engine
 
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+engine = make_engine()
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 app = FastAPI()

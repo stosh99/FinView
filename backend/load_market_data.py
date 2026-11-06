@@ -1,12 +1,12 @@
 """Load sector ETF prices and technical indicators into FinView's database."""
 
-import os
 from datetime import date, timedelta
 
 import pandas as pd
 import yfinance as yf
-from dotenv import load_dotenv
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
+
+from backend.db import make_engine
 
 SECTOR_ETFS = {
     "SPY": "SPDR S&P 500 ETF Trust",
@@ -87,9 +87,7 @@ def upsert_rows(connection, table: str, columns: list[str], rows: list[dict]) ->
 
 
 def main() -> None:
-    load_dotenv()
-    database_url = os.getenv("DATABASE_URL", "postgresql+psycopg2:///finview")
-    engine = create_engine(database_url, pool_pre_ping=True)
+    engine = make_engine()
     start = date.today() - timedelta(days=3 * 366)
 
     with engine.begin() as connection:
