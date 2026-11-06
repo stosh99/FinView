@@ -77,6 +77,15 @@ export default {
         const dates = data.dates;
         const ohlc = data.ohlc;
 
+        // One colour per indicator, applied to both lineStyle (the drawn line)
+        // and itemStyle (what the legend swatch is filled from) so the two
+        // cannot drift apart. Same pattern as RRG.vue.
+        const indicatorColors = {
+          sma50: '#2196F3',
+          sma200: '#FF9800',
+          ema21: '#9C27B0'
+        };
+
         const option = {
           animation: false,
           legend: {
@@ -212,8 +221,9 @@ export default {
               lineStyle: {
                 opacity: 0.8,
                 width: 1.5,
-                color: '#2196F3'
+                color: indicatorColors.sma50
               },
+              itemStyle: { color: indicatorColors.sma50 },
               showSymbol: false
             },
             {
@@ -224,8 +234,9 @@ export default {
               lineStyle: {
                 opacity: 0.8,
                 width: 1.5,
-                color: '#FF9800'
+                color: indicatorColors.sma200
               },
+              itemStyle: { color: indicatorColors.sma200 },
               showSymbol: false
             },
             {
@@ -236,8 +247,9 @@ export default {
               lineStyle: {
                 opacity: 0.8,
                 width: 1.5,
-                color: '#9C27B0'
+                color: indicatorColors.ema21
               },
+              itemStyle: { color: indicatorColors.ema21 },
               showSymbol: false
             },
             {

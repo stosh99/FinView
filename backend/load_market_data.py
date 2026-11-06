@@ -8,7 +8,6 @@ import yfinance as yf
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 
-
 SECTOR_ETFS = {
     "SPY": "SPDR S&P 500 ETF Trust",
     "XLB": "Materials Select Sector SPDR Fund",

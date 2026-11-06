@@ -1,11 +1,11 @@
-
 import os
-import pandas as pd
+
 import numpy as np
+import pandas as pd
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from dotenv import load_dotenv
 
 load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+psycopg2:///finview")
@@ -15,66 +15,54 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 app = FastAPI()
 
-def calculate_rrg_data():
-    benchmark = "SPY"
-    window = 14
-    tail_length = 12
 
+def load_daily_closes():
+    """Daily closes for every tracked ETF, as a date x ticker frame."""
     # noinspection SqlDialectInspection
     query = """
     SELECT p.date, p.ticker, p.close
     FROM prices p
     INNER JOIN sector_etfs s ON s.symbol = p.ticker
-    WHERE p.date > CURRENT_DATE - INTERVAL '2 years'
+    WHERE p.date > CURRENT_DATE - INTERVAL '3 years'
       AND p.close IS NOT NULL
     """
     with SessionLocal() as db:
         df = pd.read_sql(query, db.bind)
-        print(f"Initial data loaded with {len(df)} rows.")
 
     if df.empty:
-        return []
+        print("No price rows loaded.")
+        return None
 
-    df['date'] = pd.to_datetime(df['date'])
-
-    # Pivot the table to get tickers as columns
-    pivot_df = df.pivot_table(index='date', columns='ticker', values='close', aggfunc='last')
+    df["date"] = pd.to_datetime(df["date"])
+    pivot_df = df.pivot_table(
+        index="date", columns="ticker", values="close", aggfunc="last"
+    )
     pivot_df = pivot_df.sort_index().ffill()
-    print(f"Pivot table created with {len(pivot_df)} daily rows.")
+    print(f"Loaded {len(pivot_df)} daily rows for {len(pivot_df.columns)} tickers.")
+    return pivot_df
 
-    if benchmark not in pivot_df.columns:
-        print(f"{benchmark} data not found in prices.")
-        return []
 
-    # RRGs are usually evaluated on weekly data. Use the last available close
-    # in each week so every point in the tail represents one week.
-    weekly_prices = pivot_df.resample('W-FRI').last().ffill()
-    print(f"Weekly price table created with {len(weekly_prices)} rows.")
+def build_tails(rs_ratio, rs_momentum, tail_length, tail_interval=1):
+    """Turn aligned RS-Ratio / RS-Momentum frames into per-ticker tails.
 
-    benchmark_prices = weekly_prices[benchmark].replace(0, np.nan)
-    sector_prices = weekly_prices.drop(columns=[benchmark])
-
-    # Directional approximation of RRG calculations:
-    # 1. Relative strength is sector price divided by benchmark price.
-    # 2. RS-Ratio is relative strength normalized around its rolling mean.
-    # 3. RS-Momentum is RS-Ratio normalized around its rolling mean.
-    relative_strength = sector_prices.div(benchmark_prices, axis=0)
-    rs_ratio = 100 * relative_strength.div(relative_strength.rolling(window=window).mean())
-    rs_momentum = 100 * rs_ratio.div(rs_ratio.rolling(window=window).mean())
-
+    tail_interval thins the series before the tail is taken, so a daily series
+    can be shown with weekly spacing while still ending on the newest point.
+    """
     rs_ratio = rs_ratio.replace([np.inf, -np.inf], np.nan)
     rs_momentum = rs_momentum.replace([np.inf, -np.inf], np.nan)
 
-    if rs_ratio.empty or rs_momentum.empty:
-        print("No data after RRG calculations.")
-        return []
-
     rrg_data = []
     for ticker in rs_ratio.columns:
-        ticker_df = pd.DataFrame({
-            'rs_ratio': rs_ratio[ticker],
-            'rs_momentum': rs_momentum[ticker],
-        }).dropna()
+        ticker_df = pd.DataFrame(
+            {
+                "rs_ratio": rs_ratio[ticker],
+                "rs_momentum": rs_momentum[ticker],
+            }
+        ).dropna()
+
+        if tail_interval > 1:
+            # Thin from the newest end so the last point is always the latest.
+            ticker_df = ticker_df.iloc[::-1].iloc[::tail_interval].iloc[::-1]
 
         if len(ticker_df) < tail_length:
             continue
@@ -82,26 +70,119 @@ def calculate_rrg_data():
         tail_df = ticker_df.tail(tail_length).reset_index()
         tail = [
             {
-                'date': row['date'].strftime('%Y-%m-%d'),
-                'rs_ratio': round(float(row['rs_ratio']), 4),
-                'rs_momentum': round(float(row['rs_momentum']), 4),
+                "date": row["date"].strftime("%Y-%m-%d"),
+                "rs_ratio": round(float(row["rs_ratio"]), 4),
+                "rs_momentum": round(float(row["rs_momentum"]), 4),
             }
             for _, row in tail_df.iterrows()
         ]
-        latest = tail[-1]
 
-        rrg_data.append({
-            'ticker': ticker,
-            'latest': latest,
-            'tail': tail,
-        })
+        rrg_data.append(
+            {
+                "ticker": ticker,
+                "latest": tail[-1],
+                "tail": tail,
+            }
+        )
 
     print(f"Returning {len(rrg_data)} RRG tails.")
     return rrg_data
 
+
+def calculate_rrg_data():
+    benchmark = "SPY"
+
+    # JdK-style RRG. The published RS-Ratio / RS-Momentum formulas are
+    # proprietary; this is the z-score construction commonly used to
+    # reproduce them:
+    #   RS-Ratio    = 100 + z-score(100 * sector / benchmark), smoothed
+    #   RS-Momentum = 100 + z-score(rate of change of RS-Ratio), smoothed
+    # Momentum must come from the *change* in RS-Ratio. Deriving it from the
+    # level of RS-Ratio makes both axes carry the same signal and collapses
+    # every tail onto the diagonal.
+    zscore_window = 52  # weeks of history each z-score is measured against
+    ratio_smoothing = 10  # EMA span applied to RS-Ratio
+    momentum_lookback = 4  # weeks spanned by the RS-Ratio rate of change
+    momentum_smoothing = 3  # EMA span applied to RS-Momentum
+    tail_length = 12
+
+    pivot_df = load_daily_closes()
+    if pivot_df is None or benchmark not in pivot_df.columns:
+        return []
+
+    # RRGs are usually evaluated on weekly data. Use the last available close
+    # in each week so every point in the tail represents one week.
+    weekly_prices = pivot_df.resample("W-FRI").last().ffill()
+    print(f"Weekly price table created with {len(weekly_prices)} rows.")
+
+    benchmark_prices = weekly_prices[benchmark].replace(0, np.nan)
+    sector_prices = weekly_prices.drop(columns=[benchmark])
+
+    def normalize(frame):
+        """Centre a frame on 100, in units of its own rolling std deviation."""
+        rolling = frame.rolling(window=zscore_window)
+        return 100 + (frame - rolling.mean()).div(rolling.std())
+
+    relative_strength = 100 * sector_prices.div(benchmark_prices, axis=0)
+
+    rs_ratio = (
+        normalize(relative_strength).ewm(span=ratio_smoothing, adjust=False).mean()
+    )
+
+    ratio_roc = 100 * rs_ratio.div(rs_ratio.shift(momentum_lookback)) - 100
+    rs_momentum = normalize(ratio_roc).ewm(span=momentum_smoothing, adjust=False).mean()
+
+    return build_tails(rs_ratio, rs_momentum, tail_length)
+
+
+def calculate_openbb_rrg_data():
+    """OpenBB's RRG construction, kept alongside the JdK-style one.
+
+    Mirrors openbb_technical/relative_rotation.py:
+        RS-Ratio    = (sector / benchmark) * 100, z-scored
+        RS-Momentum = ln(1 + r_long) - ln(1 + r_short) of that ratio, z-scored
+    Daily data, no smoothing, quadrants centred on 0 rather than 100.
+
+    The z-score is deliberately full-sample because that is what OpenBB does,
+    which means a historical point is normalised using data recorded after it.
+    Fine for drawing today's picture; not safe to backtest on.
+    """
+    benchmark = "SPY"
+    long_period = 252  # trading days in a year
+    short_period = 21  # trading days in a month
+    tail_length = 12
+    tail_interval = 5  # trading days between tail points, i.e. weekly spacing
+
+    pivot_df = load_daily_closes()
+    if pivot_df is None or benchmark not in pivot_df.columns:
+        return []
+
+    benchmark_prices = pivot_df[benchmark].replace(0, np.nan)
+    sector_prices = pivot_df.drop(columns=[benchmark])
+
+    ratio = 100 * sector_prices.div(benchmark_prices, axis=0)
+    momentum = np.log1p(ratio.pct_change(long_period)) - np.log1p(
+        ratio.pct_change(short_period)
+    )
+
+    def zscore(frame):
+        """Full-sample standardisation, matching OpenBB's implementation."""
+        return (frame - frame.mean()) / frame.std()
+
+    return build_tails(
+        zscore(ratio), zscore(momentum), tail_length, tail_interval=tail_interval
+    )
+
+
 @app.get("/api/rrg-data")
 def get_rrg_data():
     return calculate_rrg_data()
+
+
+@app.get("/api/rrg-openbb-data")
+def get_openbb_rrg_data():
+    return calculate_openbb_rrg_data()
+
 
 @app.get("/api/sector-chart-data")
 def get_sector_chart_data():
@@ -117,7 +198,7 @@ def get_sector_chart_data():
     with SessionLocal() as db:
         etf_names_df = pd.read_sql(names_query, db.bind)
 
-    etf_names = dict(zip(etf_names_df['symbol'], etf_names_df['name']))
+    etf_names = dict(zip(etf_names_df["symbol"], etf_names_df["name"]))
 
     query = """
     WITH sector_symbols AS (
@@ -149,33 +230,34 @@ def get_sector_chart_data():
 
     # Convert to dict grouped by ticker
     result = {}
-    for ticker in df['ticker'].unique():
-        ticker_df = df[df['ticker'] == ticker].copy()
-        ticker_df['date'] = ticker_df['date'].astype(str)
+    for ticker in df["ticker"].unique():
+        ticker_df = df[df["ticker"] == ticker].copy()
+        ticker_df["date"] = ticker_df["date"].astype(str)
 
         # Forward fill technical indicators
-        ticker_df['sma50'] = ticker_df['sma50'].ffill()
-        ticker_df['sma200'] = ticker_df['sma200'].ffill()
-        ticker_df['ema21'] = ticker_df['ema21'].ffill()
-        ticker_df['boll_up'] = ticker_df['boll_up'].ffill()
-        ticker_df['boll_dn'] = ticker_df['boll_dn'].ffill()
+        ticker_df["sma50"] = ticker_df["sma50"].ffill()
+        ticker_df["sma200"] = ticker_df["sma200"].ffill()
+        ticker_df["ema21"] = ticker_df["ema21"].ffill()
+        ticker_df["boll_up"] = ticker_df["boll_up"].ffill()
+        ticker_df["boll_dn"] = ticker_df["boll_dn"].ffill()
 
         # Replace all NaN with None (converts to null in JSON)
         ticker_df = ticker_df.replace({np.nan: None})
 
         result[ticker] = {
-            'name': etf_names.get(ticker, ''),
-            'dates': ticker_df['date'].tolist(),
-            'ohlc': ticker_df[['open', 'high', 'low', 'close']].values.tolist(),
-            'volume': ticker_df['volume'].tolist(),
-            'sma50': ticker_df['sma50'].tolist(),
-            'sma200': ticker_df['sma200'].tolist(),
-            'ema21': ticker_df['ema21'].tolist(),
-            'boll_up': ticker_df['boll_up'].tolist(),
-            'boll_dn': ticker_df['boll_dn'].tolist(),
+            "name": etf_names.get(ticker, ""),
+            "dates": ticker_df["date"].tolist(),
+            "ohlc": ticker_df[["open", "high", "low", "close"]].values.tolist(),
+            "volume": ticker_df["volume"].tolist(),
+            "sma50": ticker_df["sma50"].tolist(),
+            "sma200": ticker_df["sma200"].tolist(),
+            "ema21": ticker_df["ema21"].tolist(),
+            "boll_up": ticker_df["boll_up"].tolist(),
+            "boll_dn": ticker_df["boll_dn"].tolist(),
         }
 
     return result
+
 
 if __name__ == "__main__":
     import subprocess
@@ -198,7 +280,7 @@ if __name__ == "__main__":
             cwd=frontend_dir,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
         )
         print("✓ Frontend process started")
     except Exception as e:
@@ -225,6 +307,7 @@ if __name__ == "__main__":
 
     try:
         import uvicorn
+
         uvicorn.run(app, host="0.0.0.0", port=8010)
     except KeyboardInterrupt:
         print("\n\n🛑 Shutting down servers...")
