@@ -18,7 +18,8 @@ def load_daily_closes():
     SELECT p.date, p.ticker, p.close
     FROM prices p
     INNER JOIN sector_etfs s ON s.symbol = p.ticker
-    WHERE p.date > CURRENT_DATE - INTERVAL '3 years'
+    WHERE s.category IN ('benchmark', 'sector')
+      AND p.date > CURRENT_DATE - INTERVAL '3 years'
       AND p.close IS NOT NULL
     """
     with SessionLocal() as db:
@@ -198,6 +199,7 @@ def get_sector_chart_data():
     query = """
     WITH sector_symbols AS (
         SELECT symbol FROM sector_etfs
+        WHERE category IN ('benchmark', 'sector')
         ORDER BY CASE WHEN symbol = 'SPY' THEN 0 ELSE 1 END, symbol
     )
     SELECT
