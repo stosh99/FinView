@@ -59,6 +59,12 @@ npm --prefix frontend run dev
 .venv/bin/alembic current
 ```
 
+Prod nightly load (VPS): systemd `finview-market-data.timer` → `.service`,
+weekdays 18:30 ET; unit files in `deploy/systemd/` (copy to
+`/etc/systemd/system/`, then `daemon-reload`). Check with
+`journalctl -u finview-market-data -n 50` and `systemctl list-timers finview*`.
+The loader exits 1 if any ticker or series failed (others still load).
+
 ## Data model
 
 - `sector_etfs(symbol, name, category)` — every tracked ETF (name is

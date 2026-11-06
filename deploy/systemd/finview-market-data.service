@@ -1,0 +1,15 @@
+[Unit]
+Description=FinView — reload ETF prices, indicators and FRED rates into finview_prod
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=stosh99
+WorkingDirectory=/home/stosh99/projects/FinView
+# DATABASE_URL comes from the repo's .env (loaded by backend/db.py).
+ExecStart=/home/stosh99/projects/FinView/.venv/bin/python -m backend.load_market_data
+TimeoutStartSec=30min
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=finview-market-data

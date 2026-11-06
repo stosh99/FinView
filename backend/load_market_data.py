@@ -5,6 +5,8 @@ adjusted (auto_adjust), and adjusted history shifts every time a fund pays a
 distribution, so a full reload is what keeps the stored series consistent.
 """
 
+import logging
+import sys
 from datetime import date, timedelta
 
 import pandas as pd
@@ -12,6 +14,8 @@ import yfinance as yf
 from sqlalchemy import text
 
 from backend.db import make_engine
+
+logger = logging.getLogger(__name__)
 
 # Earliest date requested; each ETF's history starts at its own inception.
 HISTORY_START = date(1993, 1, 1)
@@ -73,7 +77,8 @@ def download_fred_series(series_id: str) -> list[dict]:
     return frame[["series_id", "date", "value"]].to_dict("records")
 
 
-def load_rates(engine) -> None:
+def load_rates(engine) -> list[str]:
+    """Load every FRED series; returns the series that failed."""
     statement = text(
         """
         INSERT INTO rates (series_id, date, value)
@@ -81,12 +86,21 @@ def load_rates(engine) -> None:
         ON CONFLICT (series_id, date) DO UPDATE SET value = EXCLUDED.value
         """
     )
+    failed = []
     for series_id in FRED_SERIES:
-        print(f"Downloading FRED {series_id}...")
-        rows = download_fred_series(series_id)
-        with engine.begin() as connection:
-            connection.execute(statement, rows)
-        print(f"Loaded {len(rows)} rows for {series_id}.")
+        logger.info("Downloading FRED %s", series_id)
+        try:
+            rows = download_fred_series(series_id)
+            with engine.begin() as connection:
+                connection.execute(statement, rows)
+        except Exception:
+            logger.exception("FRED %s failed; keeping the stored series", series_id)
+            failed.append(series_id)
+            continue
+        logger.info(
+            "Loaded %d rows for %s through %s", len(rows), series_id, rows[-1]["date"]
+        )
+    return failed
 
 
 def calculate_indicators(prices: pd.DataFrame) -> pd.DataFrame:
@@ -151,7 +165,13 @@ def upsert_rows(connection, table: str, columns: list[str], rows: list[dict]) ->
     connection.execute(statement, rows)
 
 
-def main() -> None:
+def main() -> int:
+    """Load everything; returns the process exit code (1 if anything failed).
+
+    One ticker failing doesn't stop the run: each ticker is its own
+    transaction, so a failure leaves that ticker's stored rows untouched and
+    the rest still load. The non-zero exit makes systemd mark the run failed.
+    """
     engine = make_engine()
 
     with engine.begin() as connection:
@@ -170,29 +190,47 @@ def main() -> None:
             ],
         )
 
+    failed = []
     for ticker in ETFS:
-        print(f"Downloading {ticker}...")
-        prices = download_prices(ticker, HISTORY_START)
-        indicators = calculate_indicators(prices)
-        with engine.begin() as connection:
-            upsert_rows(
-                connection,
-                "prices",
-                ["ticker", "date", "open", "high", "low", "close", "volume"],
-                prices.to_dict("records"),
-            )
-            upsert_rows(
-                connection,
-                "technical_indicators",
-                ["ticker", "date", "sma50", "sma200", "ema21", "boll_up", "boll_dn"],
-                indicators.where(pd.notna(indicators), None).to_dict("records"),
-            )
-        print(f"Loaded {len(prices)} rows for {ticker}.")
+        logger.info("Downloading %s", ticker)
+        try:
+            load_ticker(engine, ticker)
+        except Exception:
+            logger.exception("%s failed; keeping its stored rows", ticker)
+            failed.append(ticker)
 
-    load_rates(engine)
+    failed += load_rates(engine)
 
-    print("FinView market data is up to date.")
+    if failed:
+        logger.error("Load finished with failures: %s", ", ".join(failed))
+        return 1
+    logger.info("FinView market data is up to date.")
+    return 0
+
+
+def load_ticker(engine, ticker: str) -> None:
+    prices = download_prices(ticker, HISTORY_START)
+    indicators = calculate_indicators(prices)
+    with engine.begin() as connection:
+        upsert_rows(
+            connection,
+            "prices",
+            ["ticker", "date", "open", "high", "low", "close", "volume"],
+            prices.to_dict("records"),
+        )
+        upsert_rows(
+            connection,
+            "technical_indicators",
+            ["ticker", "date", "sma50", "sma200", "ema21", "boll_up", "boll_dn"],
+            indicators.where(pd.notna(indicators), None).to_dict("records"),
+        )
+    logger.info(
+        "Loaded %d rows for %s through %s", len(prices), ticker, prices["date"].max()
+    )
 
 
 if __name__ == "__main__":
-    main()
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
+    )
+    sys.exit(main())
