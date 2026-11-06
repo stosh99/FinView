@@ -133,6 +133,8 @@ a paper / small run.
 *Revised 2026-11-06:* backtest moved ahead of the signal view. A view showing
 what an untested strategy "would hold today" invites acting on it before the
 rules are chosen; after the backtest, the view shows the chosen rules' picks.
+*Progress 2026-11-06:* (1) done — prod on migration 0003, nightly load
+running. Next: (2).
 
 ## Other
 

@@ -42,8 +42,8 @@ program.
 
 | # | Module | Purpose | Status (2026-11-06) |
 |---|--------|---------|---------------------|
-| M1 | Market data | Daily adjusted prices, indicators, rates | **Built.** 20 ETFs full history (yfinance), SMA/EMA/Bollinger, FRED DTB3 |
-| M2 | Charts and RRG | Weekly RRG (sectors); candlestick charts for the whole basket, grouped by category; cash shown as the DTB3 yield | **Built** (full-basket charts added 2026-11-06 on branch `feat/basket-etf-charts`; not on `main` until merged) |
+| M1 | Market data | Daily adjusted prices, indicators, rates | **Built.** 20 ETFs full history (yfinance), SMA/EMA/Bollinger, FRED DTB3; loaded nightly into prod (weekdays 18:30 ET) |
+| M2 | Charts and RRG | Weekly RRG (sectors); candlestick charts for the whole basket, grouped by category; cash shown as the DTB3 yield | **Built** (full-basket charts added 2026-11-06). Web app not yet deployed on the VPS |
 | M3 | ETF rotation / allocation | Monthly allocation of a defined sum across the basket | **Priorities 1–3** (D-020). Design in `../ALLOCATION_DESIGN.md` |
 | M4 | Backtesting engine (`allockit`) | Test allocation rules honestly | **Priority 2** — next after prod DB |
 | M5 | Holdings & income | IBKR (read-only) positions, dividend/interest history and projections, bond ladder | Not started |
@@ -61,9 +61,10 @@ program.
 
 Driven by a current need: a rotation strategy for a specific pool of money.
 
-1. **Working database + nightly load.** Bring `finview_prod` current
-   (migrations 0002–0003), schedule the loader on the VPS weekdays after the
-   close, with logging so failures are visible.
+1. ~~**Working database + nightly load.**~~ **Done 2026-11-06:**
+   `finview_prod` on migration 0003 with all 20 ETFs and DTB3; systemd timer
+   `finview-market-data` loads weekdays 18:30 ET; failures show in
+   `systemctl --failed` and the journal (no alerting yet).
 2. **Backtesting methodology** (`allockit`): monthly rebalance, eligibility as
    ETFs come into existence, DTB3 cash before BIL, costs, baselines. Settles
    the allocation rules with evidence (questions listed in §8). Fix the BIL

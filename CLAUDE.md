@@ -107,5 +107,5 @@ The loader exits 1 if any ticker or series failed (others still load).
 ## Status and priorities
 
 - Priorities: D-020 in the decision log; module status: brief §2–3.
-- **Prod is behind dev** (`finview_prod` on migration 0001, older VPS code).
-  Don't assume prod matches dev.
+- Prod runs whatever `main` the VPS last pulled; check `git log -1` and
+  `alembic current` there before assuming it matches dev.
