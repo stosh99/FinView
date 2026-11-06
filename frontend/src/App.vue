@@ -6,7 +6,7 @@
         <div class="nav-links">
           <router-link to="/" class="nav-link">RRG</router-link>
           <router-link to="/rrg-openbb" class="nav-link">RRG (OpenBB)</router-link>
-          <router-link to="/sector-charts" class="nav-link">Sector Charts</router-link>
+          <router-link to="/sector-charts" class="nav-link">ETF Charts</router-link>
         </div>
       </div>
     </nav>

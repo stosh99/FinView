@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from fastapi import FastAPI
+from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
 from backend.db import make_engine
@@ -180,30 +181,35 @@ def get_openbb_rrg_data():
     return calculate_openbb_rrg_data()
 
 
+# Display order for the charts page; matches the basket table in
+# docs/ALLOCATION_DESIGN.md. Every category in the sector_etfs check
+# constraint must appear here or its ETFs sort last.
+CHART_CATEGORY_ORDER = [
+    "benchmark",
+    "sector",
+    "small_cap",
+    "international",
+    "real_asset",
+    "currency",
+    "cash",
+]
+
+# FRED series charted for cash ETFs: 3-month T-bill rate, percent.
+CASH_RATE_SERIES = "DTB3"
+
+
 @app.get("/api/sector-chart-data")
 def get_sector_chart_data():
     """
-    Get 1 year of OHLC data with technical indicators for all sector ETFs.
-    Returns data for candlestick charts with SMA50, SMA200, EMA21, BolUp, BolDown.
+    Get 1 year of OHLC data with technical indicators for every tracked ETF.
+    Returns a list ordered by category (CHART_CATEGORY_ORDER), then symbol, so
+    the order survives JSON. Each entry carries its category for grouping.
     """
-    # First get the ETF names
-    names_query = """
-    SELECT symbol, name FROM sector_etfs
-    """
-
-    with SessionLocal() as db:
-        etf_names_df = pd.read_sql(names_query, db.bind)
-
-    etf_names = dict(zip(etf_names_df["symbol"], etf_names_df["name"]))
-
     query = """
-    WITH sector_symbols AS (
-        SELECT symbol FROM sector_etfs
-        WHERE category IN ('benchmark', 'sector')
-        ORDER BY CASE WHEN symbol = 'SPY' THEN 0 ELSE 1 END, symbol
-    )
     SELECT
         p.ticker,
+        s.name,
+        s.category,
         p.date,
         p.open,
         p.high,
@@ -216,7 +222,7 @@ def get_sector_chart_data():
         t.boll_up,
         t.boll_dn
     FROM prices p
-    INNER JOIN sector_symbols s ON p.ticker = s.symbol
+    INNER JOIN sector_etfs s ON p.ticker = s.symbol
     LEFT JOIN technical_indicators t ON p.ticker = t.ticker AND p.date = t.date
     WHERE p.date >= CURRENT_DATE - INTERVAL '1 year'
     ORDER BY p.ticker, p.date
@@ -225,33 +231,66 @@ def get_sector_chart_data():
     with SessionLocal() as db:
         df = pd.read_sql(query, db.bind)
 
-    # Convert to dict grouped by ticker
-    result = {}
-    for ticker in df["ticker"].unique():
+    def sort_key(group):
+        ticker, category = group
+        rank = (
+            CHART_CATEGORY_ORDER.index(category)
+            if category in CHART_CATEGORY_ORDER
+            else len(CHART_CATEGORY_ORDER)
+        )
+        return rank, ticker
+
+    groups = sorted(df.groupby("ticker")["category"].first().items(), key=sort_key)
+
+    result = []
+    for ticker, category in groups:
         ticker_df = df[df["ticker"] == ticker].copy()
         ticker_df["date"] = ticker_df["date"].astype(str)
 
         # Forward fill technical indicators
-        ticker_df["sma50"] = ticker_df["sma50"].ffill()
-        ticker_df["sma200"] = ticker_df["sma200"].ffill()
-        ticker_df["ema21"] = ticker_df["ema21"].ffill()
-        ticker_df["boll_up"] = ticker_df["boll_up"].ffill()
-        ticker_df["boll_dn"] = ticker_df["boll_dn"].ffill()
+        indicator_cols = ["sma50", "sma200", "ema21", "boll_up", "boll_dn"]
+        ticker_df[indicator_cols] = ticker_df[indicator_cols].ffill()
 
         # Replace all NaN with None (converts to null in JSON)
         ticker_df = ticker_df.replace({np.nan: None})
 
-        result[ticker] = {
-            "name": etf_names.get(ticker, ""),
-            "dates": ticker_df["date"].tolist(),
-            "ohlc": ticker_df[["open", "high", "low", "close"]].values.tolist(),
-            "volume": ticker_df["volume"].tolist(),
-            "sma50": ticker_df["sma50"].tolist(),
-            "sma200": ticker_df["sma200"].tolist(),
-            "ema21": ticker_df["ema21"].tolist(),
-            "boll_up": ticker_df["boll_up"].tolist(),
-            "boll_dn": ticker_df["boll_dn"].tolist(),
-        }
+        result.append(
+            {
+                "ticker": ticker,
+                "name": ticker_df["name"].iloc[0] or "",
+                "category": category,
+                "dates": ticker_df["date"].tolist(),
+                "ohlc": ticker_df[["open", "high", "low", "close"]].values.tolist(),
+                "volume": ticker_df["volume"].tolist(),
+                "sma50": ticker_df["sma50"].tolist(),
+                "sma200": ticker_df["sma200"].tolist(),
+                "ema21": ticker_df["ema21"].tolist(),
+                "boll_up": ticker_df["boll_up"].tolist(),
+                "boll_dn": ticker_df["boll_dn"].tolist(),
+            }
+        )
+
+    # Cash is charted as a yield, not a price: a T-bill fund's price just
+    # creeps up. DTB3 keeps its own dates because FRED lags prices by a day
+    # or two; forward-filling it onto price dates would fake the latest values.
+    rate_query = """
+    SELECT date, value FROM rates
+    WHERE series_id = :series_id
+      AND date >= CURRENT_DATE - INTERVAL '1 year'
+    ORDER BY date
+    """
+    with SessionLocal() as db:
+        rate_df = pd.read_sql(
+            text(rate_query), db.bind, params={"series_id": CASH_RATE_SERIES}
+        )
+    rate = {
+        "series_id": CASH_RATE_SERIES,
+        "dates": rate_df["date"].astype(str).tolist(),
+        "values": rate_df["value"].tolist(),
+    }
+    for entry in result:
+        if entry["category"] == "cash":
+            entry["rate"] = rate
 
     return result
 
