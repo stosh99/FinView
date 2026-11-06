@@ -55,6 +55,19 @@ ETFS = {
     "BIL": ("SPDR Bloomberg 1-3 Month T-Bill ETF", "cash"),
 }
 
+# Distributions Yahoo hasn't recorded, taken from the issuer. Without them the
+# adjusted close drops on the ex-date as if the payout were a loss. Each entry
+# is applied only while Yahoo still lacks a dividend near that ex-date; once
+# Yahoo catches up the loader skips it and logs that the entry can be removed.
+# (ticker, ex-date, amount per share, source)
+MISSING_DISTRIBUTIONS = [
+    ("BIL", date(2026, 10, 1), 0.263176, "SSGA historical distributions xlsx"),
+    ("BIL", date(2026, 11, 2), 0.308493, "SSGA historical distributions xlsx"),
+]
+# How far apart Yahoo's date and the issuer's ex-date may be and still count
+# as the same distribution.
+DISTRIBUTION_MATCH_DAYS = 3
+
 # FRED series stored in the rates table (public CSV endpoint, no API key).
 # DTB3 = 3-month T-bill rate, percent; the cash return before BIL exists.
 FRED_SERIES = ["DTB3"]
@@ -116,13 +129,20 @@ def calculate_indicators(prices: pd.DataFrame) -> pd.DataFrame:
 
 
 def download_prices(ticker: str, start: date) -> pd.DataFrame:
+    """Dividend-adjusted daily OHLCV, plus any MISSING_DISTRIBUTIONS applied.
+
+    Downloads unadjusted prices with Yahoo's adjusted close and dividends, then
+    adjusts the same way yfinance's auto_adjust does (scale OHLC by
+    adj close / close). The raw close and dividend list are needed to apply
+    distributions Yahoo is missing.
+    """
     frame = yf.download(
         ticker,
         start=start.isoformat(),
         end=(date.today() + timedelta(days=1)).isoformat(),
-        auto_adjust=True,
+        auto_adjust=False,
         progress=False,
-        actions=False,
+        actions=True,
     )
     if frame.empty:
         raise RuntimeError(f"No market data returned for {ticker}")
@@ -136,7 +156,9 @@ def download_prices(ticker: str, start: date) -> pd.DataFrame:
             "High": "high",
             "Low": "low",
             "Close": "close",
+            "Adj Close": "adj_close",
             "Volume": "volume",
+            "Dividends": "dividends",
         }
     ).reset_index()
     date_column = "Date" if "Date" in frame.columns else "Datetime"
@@ -144,7 +166,49 @@ def download_prices(ticker: str, start: date) -> pd.DataFrame:
     frame["date"] = pd.to_datetime(frame["date"]).dt.date
     frame["ticker"] = ticker
     frame["volume"] = frame["volume"].fillna(0).astype("int64")
+
+    frame["raw_close"] = frame["close"]
+    ratio = frame["adj_close"] / frame["close"]
+    for column in ["open", "high", "low", "close"]:
+        frame[column] = frame[column] * ratio
+    apply_missing_distributions(ticker, frame)
     return frame[["ticker", "date", "open", "high", "low", "close", "volume"]]
+
+
+def apply_missing_distributions(ticker: str, frame: pd.DataFrame) -> None:
+    """Back-adjust frame (in place) for distributions Yahoo hasn't recorded.
+
+    Same factor Yahoo uses: every row before the ex-date is scaled by
+    1 - amount / unadjusted close of the previous trading day.
+    """
+    yahoo_dates = pd.to_datetime(frame.loc[frame["dividends"] > 0, "date"])
+    for dist_ticker, ex_date, amount, source in MISSING_DISTRIBUTIONS:
+        if dist_ticker != ticker:
+            continue
+        gap = (yahoo_dates - pd.Timestamp(ex_date)).abs()
+        if (gap <= pd.Timedelta(days=DISTRIBUTION_MATCH_DAYS)).any():
+            logger.warning(
+                "Yahoo now has %s's %s distribution; remove it from "
+                "MISSING_DISTRIBUTIONS",
+                ticker,
+                ex_date,
+            )
+            continue
+        before = frame["date"] < ex_date
+        if not before.any() or not (frame["date"] >= ex_date).any():
+            continue  # ex-date outside the downloaded range
+        previous_close = frame.loc[before, "raw_close"].iloc[-1]
+        factor = 1 - amount / previous_close
+        for column in ["open", "high", "low", "close"]:
+            frame.loc[before, column] *= factor
+        logger.info(
+            "Applied missing %s distribution %s of %.6f (%s), factor %.6f",
+            ticker,
+            ex_date,
+            amount,
+            source,
+            factor,
+        )
 
 
 def upsert_rows(connection, table: str, columns: list[str], rows: list[dict]) -> None:

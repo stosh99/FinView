@@ -109,7 +109,7 @@ sectors plus Japan).
 FRED 3-month T-bill rate accrued daily, with ~0.15%/yr drag (BIL trailed
 DTB3 by ~0.17%/yr, 2008–2026). BIL's 2026 YTD gap (~0.8%) is confirmed as a
 Yahoo-side gap: its dividend list ends 2026-09-01 (SGOV has the same gap).
-Must be fixed before the backtest trusts 2026 cash returns.
+Fixed 2026-11-06 — see D-023.
 
 **D-018 — Trend filter: to be chosen by backtest** · 2026-11-06 · Proposed · Low
 Whether a slot winner must also pass a trend filter, and which one, is open.
@@ -118,6 +118,20 @@ Candidates are ideas, not settled: golden cross (SMA50 > SMA200), price >
 filter is used it is checked at the rebalance date, not daily. A filter only
 screens; momentum rank still chooses among the ETFs that pass. (Revised
 2026-11-06: originally proposed the golden cross specifically.)
+
+**D-023 — Patch Yahoo's missing distributions from issuer data** · 2026-11-06 · Decided · High
+Yahoo's BIL dividend list stops at 2026-09-01, so the Oct 1 ($0.263176) and
+Nov 2 ($0.308493) ex-dates showed as price drops and BIL's 1-year return read
+3.06% instead of 3.70%. Amounts taken from State Street's historical
+distributions file (matching YCharts / Market Chameleon). The loader keeps
+them in `MISSING_DISTRIBUTIONS` and back-adjusts with Yahoo's own factor
+(1 − amount / previous unadjusted close) only while Yahoo lacks a dividend
+within 3 days of that ex-date; it then logs that the entry can be removed.
+Checked 2026-11-06: every other basket ETF's latest SSGA payout is in Yahoo.
+Alternatives: wait for Yahoo (no timeline), or keep a full distributions table
+(more upkeep than one gap justifies). **Revisit trigger:** gaps recur often
+enough that a hand-kept list becomes a chore → a distributions table or a
+data vendor (D-019).
 
 **D-019 — Yahoo data, full overwrite nightly (temporary)** · 2026-11-06 · Temporary · High
 Accepted for the rotation work despite the provenance principle (raw

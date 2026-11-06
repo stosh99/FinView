@@ -95,7 +95,8 @@ The loader exits 1 if any ticker or series failed (others still load).
 - `.env` files and `~/.config/finview/db-passwords` hold secrets — don't print
   them; mask passwords in any output.
 - The loader reloads full history on purpose: adjusted prices shift whenever a
-  fund pays a distribution.
+  fund pays a distribution. Payouts Yahoo misses go in `MISSING_DISTRIBUTIONS`
+  (issuer amounts); when the loader warns Yahoo has caught up, delete the entry.
 - **npm gotcha:** this machine has `NODE_ENV=production` set globally, so a
   plain `npm install` skips devDependencies (Vite). Use
   `npm install --include=dev`, and don't commit incidental

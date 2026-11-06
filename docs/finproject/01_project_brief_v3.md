@@ -67,8 +67,8 @@ Driven by a current need: a rotation strategy for a specific pool of money.
    `systemctl --failed` and the journal (no alerting yet).
 2. **Backtesting methodology** (`allockit`): monthly rebalance, eligibility as
    ETFs come into existence, DTB3 cash before BIL, costs, baselines. Settles
-   the allocation rules with evidence (questions listed in §8). Fix the BIL
-   missing-distribution gap first (§5).
+   the allocation rules with evidence (questions listed in §8). (BIL
+   distribution gap fixed 2026-11-06, D-023.)
 3. **Signal + current-allocation view.** Per ETF: momentum rank and trend
    status; what the rules chosen in step 2 would hold today. Comes after the
    backtest so the page never shows an untested strategy's picks.
@@ -112,9 +112,9 @@ allocation run first.
   inception. Full history reloaded every run (adjusted history shifts on every
   distribution). Accepted temporarily — see decision log D-019.
 - **Rates:** FRED `DTB3` (3-month T-bill, 1954–present).
-- **Known Yahoo gap:** BIL (and SGOV) distributions after 2026-09-01 are
-  missing from Yahoo, so 2026 cash returns are understated. Fix before the
-  backtest trusts 2026 cash.
+- **Yahoo distribution gaps:** Yahoo can miss recent payouts (BIL's Oct and
+  Nov 2026 were missing). The loader applies issuer-sourced amounts from
+  `MISSING_DISTRIBUTIONS` until Yahoo catches up (D-023).
 - **Not usable from Yahoo:** money-market funds (flat $1.00 NAV, dividends
   missing → 0% return). Cash is BIL plus DTB3 (D-022); MMF yields only from fund sites.
 - **Later (vendor phase):** point-in-time history, corporate actions,
