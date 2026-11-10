@@ -59,6 +59,14 @@
 <script>
 import * as echarts from 'echarts';
 
+// The API sends dates as 'YYYY-MM-DD'; turn that text into M/D/YYYY directly.
+// new Date('2026-11-06') is UTC midnight, i.e. the evening before in US time
+// zones, so formatting a Date object put every label one day early.
+function formatDateLabel(value) {
+  const [year, month, day] = value.split('-');
+  return `${Number(month)}/${Number(day)}/${year}`;
+}
+
 export default {
   name: 'SectorCharts',
   data() {
@@ -240,11 +248,10 @@ export default {
               show: true,
               rotate: 45,
               fontSize: 10,
-              formatter: function(value) {
-                // Format date to show MM/DD/YYYY
-                const date = new Date(value);
-                return (date.getMonth() + 1) + '/' + date.getDate() + '/' + date.getFullYear();
-              }
+              // Always label the newest candle; ECharts hides the neighbouring
+              // label instead if the two would overlap.
+              showMaxLabel: true,
+              formatter: formatDateLabel
             }
           },
           {
@@ -417,10 +424,8 @@ export default {
           axisLabel: {
             rotate: 45,
             fontSize: 10,
-            formatter: function(value) {
-              const date = new Date(value);
-              return (date.getMonth() + 1) + '/' + date.getDate() + '/' + date.getFullYear();
-            }
+            showMaxLabel: true,
+            formatter: formatDateLabel
           }
         },
         yAxis: {
